@@ -6,7 +6,7 @@ const LAYER_API_KEY = process.env.LAYER_API_KEY;
 
 const TABLE_NAME = "Templates";
 
-exports.handler = async () => {
+exports.handler = async function (event, context) {
   try {
     const airtableURL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(TABLE_NAME)}?filterByFormula=Status='Push'`;
 

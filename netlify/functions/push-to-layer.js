@@ -18,7 +18,7 @@ exports.handler = async function (event, context) {
 
     const { records } = await recordsResponse.json();
     if (!records.length) {
-      console.log("No records to process.");
+      console.log("🚫 No records to process.");
       return {
         statusCode: 200,
         body: JSON.stringify({ message: "No records to process." }),
@@ -31,7 +31,7 @@ exports.handler = async function (event, context) {
     const projectURL = record.fields["Layer Project URL"];
 
     if (!templateName || !schemaText || !projectURL) {
-      console.log("Missing required field(s).");
+      console.log("❌ Missing Template Name, JSON, or Layer Project URL");
       return {
         statusCode: 400,
         body: JSON.stringify({ error: "Missing Template Name, JSON, or Layer Project URL" }),
@@ -42,6 +42,8 @@ exports.handler = async function (event, context) {
     const projectId = projectURL.split("/").pop();
 
     for (const category of schema) {
+      console.log(`📁 Creating category: ${category.name}`);
+
       const catRes = await fetch(`https://api.layer.team/v1/projects/${projectId}/categories`, {
         method: "POST",
         headers: {
@@ -51,12 +53,19 @@ exports.handler = async function (event, context) {
         body: JSON.stringify({ name: category.name }),
       });
 
+      const catStatus = catRes.status;
       const catData = await catRes.json();
+      console.log(`📦 Category status ${catStatus} →`, catData);
+
+      if (!catData.id) {
+        throw new Error(`Failed to create category: ${JSON.stringify(catData)}`);
+      }
+
       const categoryId = catData.id;
 
-      // Create all fields in parallel for speed
-      const fieldPromises = category.fields.map((field) =>
-        fetch(`https://api.layer.team/v1/categories/${categoryId}/fields`, {
+      const fieldPromises = category.fields.map((field) => {
+        console.log(`➡️  Creating field: ${field.name} (${field.type})`);
+        return fetch(`https://api.layer.team/v1/categories/${categoryId}/fields`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${LAYER_API_KEY}`,
@@ -67,8 +76,8 @@ exports.handler = async function (event, context) {
             type: field.type,
             ...(field.options ? { options: field.options } : {}),
           }),
-        })
-      );
+        });
+      });
 
       await Promise.all(fieldPromises);
     }
@@ -91,8 +100,7 @@ exports.handler = async function (event, context) {
       }),
     });
 
-    console.log(`✅ Template '${templateName}' published to ${projectURL}`);
-
+    console.log(`✅ Template '${templateName}' pushed to Layer project ${projectId}`);
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -101,7 +109,7 @@ exports.handler = async function (event, context) {
       }),
     };
   } catch (err) {
-    console.error("❌ Error during function run:", err);
+    console.error("❌ Error during Layer push:", err);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: err.message }),

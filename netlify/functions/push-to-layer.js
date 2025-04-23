@@ -39,7 +39,7 @@ exports.handler = async function (event, context) {
 
     const schema = JSON.parse(schemaText);
 
-    // Step 1: Create new Layer project
+    // Step 1: Create Layer project
     const projectRes = await fetch("https://api.layer.team/v1/projects", {
       method: "POST",
       headers: {
@@ -53,10 +53,17 @@ exports.handler = async function (event, context) {
     });
 
     const projectData = await projectRes.json();
+    console.log("📦 Layer project API response:", projectData); // 🧠 Debug here
+
+    if (!projectData || !projectData.id) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: "Failed to create Layer project", details: projectData }),
+      };
+    }
+
     const projectId = projectData.id;
     const projectURL = `https://app.layer.team/project/${projectId}`;
-
-    console.log(`📁 Created Layer project: ${projectId}`);
 
     // Step 2: Add categories + fields
     for (const category of schema) {
@@ -112,10 +119,13 @@ exports.handler = async function (event, context) {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: "Template pushed and published.", projectURL }),
+      body: JSON.stringify({
+        message: "Template pushed and published.",
+        projectURL,
+      }),
     };
   } catch (err) {
-    console.error("❌ Error:", err);
+    console.error("❌ Error during function run:", err);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: err.message }),

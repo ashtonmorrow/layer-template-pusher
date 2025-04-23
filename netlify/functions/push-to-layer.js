@@ -6,110 +6,76 @@ const LAYER_API_KEY = process.env.LAYER_API_KEY;
 
 const TABLE_NAME = "Templates";
 
-exports.handler = async function (event, context) {
+exports.handler = async function () {
   try {
-    const airtableURL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(TABLE_NAME)}?filterByFormula=Status='Push'&maxRecords=1`;
+    // 1. Fetch Airtable records with status Push
+    const airtableURL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(TABLE_NAME)}?filterByFormula=Status='Push'`;
 
-    const recordsResponse = await fetch(airtableURL, {
+    const recordsRes = await fetch(airtableURL, {
       headers: {
         Authorization: `Bearer ${AIRTABLE_API_KEY}`,
       },
     });
 
-    const { records } = await recordsResponse.json();
+    const { records } = await recordsRes.json();
     if (!records.length) {
-      console.log("🚫 No records to process.");
       return {
         statusCode: 200,
-        body: JSON.stringify({ message: "No records to process." }),
+        body: JSON.stringify({ message: "No records with status Push." }),
       };
     }
 
-    const record = records[0];
-    const templateName = record.fields["Template Name"];
-    const schemaText = record.fields.JSON;
-    const projectURL = record.fields["Layer Project URL"];
+    for (const record of records) {
+      const projectURL = record.fields["Layer Project URL"];
+      const templateName = record.fields["Template Name"];
+      const schemaText = record.fields["JSON"];
 
-    if (!templateName || !schemaText || !projectURL) {
-      console.log("❌ Missing Template Name, JSON, or Layer Project URL");
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "Missing Template Name, JSON, or Layer Project URL" }),
-      };
-    }
-
-    const schema = JSON.parse(schemaText);
-    const projectId = projectURL.split("/").pop();
-
-    for (const category of schema) {
-      console.log(`📁 Creating category: ${category.name}`);
-
-      const catRes = await fetch(`https://api.layer.team/v1/projects/${projectId}/categories`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LAYER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name: category.name }),
-      });
-
-      const catStatus = catRes.status;
-      const catData = await catRes.json();
-      console.log(`📦 Category status ${catStatus} →`, catData);
-
-      if (!catData.id) {
-        throw new Error(`Failed to create category: ${JSON.stringify(catData)}`);
+      if (!projectURL || !schemaText) {
+        console.warn(`⚠️ Skipping '${templateName}': missing Layer URL or JSON`);
+        continue;
       }
 
-      const categoryId = catData.id;
+      const projectId = projectURL.split("/").pop();
+      const schema = JSON.parse(schemaText);
 
-      const fieldPromises = category.fields.map((field) => {
-        console.log(`➡️  Creating field: ${field.name} (${field.type})`);
-        return fetch(`https://api.layer.team/v1/categories/${categoryId}/fields`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${LAYER_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: field.name,
-            type: field.type,
-            ...(field.options ? { options: field.options } : {}),
-          }),
-        });
+      // 2. Get categories from Layer project
+      const layerRes = await fetch(`https://api.layer.team/v1/projects/${projectId}/categories`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${LAYER_API_KEY}`,
+        },
       });
 
-      await Promise.all(fieldPromises);
+      const existingCategories = await layerRes.json();
+      if (!Array.isArray(existingCategories)) {
+        throw new Error("Layer API didn't return a category list.");
+      }
+
+      // 3. Validate each JSON category
+      for (const jsonCategory of schema) {
+        const match = existingCategories.find(
+          (cat) =>
+            cat.name.toLowerCase().trim() === jsonCategory.name.toLowerCase().trim()
+        );
+
+        if (!match) {
+          console.error(`❌ Category not found in Layer: "${jsonCategory.name}"`);
+        } else if (match.name !== jsonCategory.name) {
+          console.warn(
+            `⚠️ Category mismatch: expected "${jsonCategory.name}", found "${match.name}"`
+          );
+        } else {
+          console.log(`✅ Category OK: "${jsonCategory.name}"`);
+        }
+      }
     }
 
-    await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_NAME}`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${AIRTABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        records: [
-          {
-            id: record.id,
-            fields: {
-              "Status": "Published",
-            },
-          },
-        ],
-      }),
-    });
-
-    console.log(`✅ Template '${templateName}' pushed to Layer project ${projectId}`);
     return {
       statusCode: 200,
-      body: JSON.stringify({
-        message: "Template pushed and published.",
-        projectURL,
-      }),
+      body: JSON.stringify({ message: "Validation completed." }),
     };
   } catch (err) {
-    console.error("❌ Error during Layer push:", err);
+    console.error("❌ Error in category validation:", err);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: err.message }),

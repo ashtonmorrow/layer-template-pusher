@@ -28,44 +28,20 @@ exports.handler = async function (event, context) {
     const record = records[0];
     const templateName = record.fields["Template Name"];
     const schemaText = record.fields.JSON;
+    const projectURL = record.fields["Layer Project URL"];
 
-    if (!templateName || !schemaText) {
-      console.log("Missing Template Name or JSON schema.");
+    if (!templateName || !schemaText || !projectURL) {
+      console.log("Missing required field(s).");
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: "Missing Template Name or JSON schema" }),
+        body: JSON.stringify({ error: "Missing Template Name, JSON, or Layer Project URL" }),
       };
     }
 
     const schema = JSON.parse(schemaText);
+    const projectId = projectURL.split("/").pop();
 
-    // Step 1: Create Layer project
-    const projectRes = await fetch("https://api.layer.team/v1/projects", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LAYER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: templateName,
-        isPublic: true,
-      }),
-    });
-
-    const projectData = await projectRes.json();
-    console.log("📦 Layer project API response:", projectData); // 🧠 Debug here
-
-    if (!projectData || !projectData.id) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: "Failed to create Layer project", details: projectData }),
-      };
-    }
-
-    const projectId = projectData.id;
-    const projectURL = `https://app.layer.team/project/${projectId}`;
-
-    // Step 2: Add categories + fields
+    // Step 1: Add categories + fields
     for (const category of schema) {
       const catRes = await fetch(`https://api.layer.team/v1/projects/${projectId}/categories`, {
         method: "POST",
@@ -95,7 +71,7 @@ exports.handler = async function (event, context) {
       }
     }
 
-    // Step 3: Update Airtable
+    // Step 2: Update Airtable record
     await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_NAME}`, {
       method: "PATCH",
       headers: {
@@ -107,7 +83,6 @@ exports.handler = async function (event, context) {
           {
             id: record.id,
             fields: {
-              "Layer Project URL": projectURL,
               "Status": "Published",
             },
           },
@@ -115,7 +90,7 @@ exports.handler = async function (event, context) {
       }),
     });
 
-    console.log(`✅ Template '${templateName}' published: ${projectURL}`);
+    console.log(`✅ Template '${templateName}' published to ${projectURL}`);
 
     return {
       statusCode: 200,

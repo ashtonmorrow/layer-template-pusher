@@ -41,7 +41,6 @@ exports.handler = async function (event, context) {
     const schema = JSON.parse(schemaText);
     const projectId = projectURL.split("/").pop();
 
-    // Step 1: Add categories + fields
     for (const category of schema) {
       const catRes = await fetch(`https://api.layer.team/v1/projects/${projectId}/categories`, {
         method: "POST",
@@ -55,8 +54,9 @@ exports.handler = async function (event, context) {
       const catData = await catRes.json();
       const categoryId = catData.id;
 
-      for (const field of category.fields) {
-        await fetch(`https://api.layer.team/v1/categories/${categoryId}/fields`, {
+      // Create all fields in parallel for speed
+      const fieldPromises = category.fields.map((field) =>
+        fetch(`https://api.layer.team/v1/categories/${categoryId}/fields`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${LAYER_API_KEY}`,
@@ -67,11 +67,12 @@ exports.handler = async function (event, context) {
             type: field.type,
             ...(field.options ? { options: field.options } : {}),
           }),
-        });
-      }
+        })
+      );
+
+      await Promise.all(fieldPromises);
     }
 
-    // Step 2: Update Airtable record
     await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_NAME}`, {
       method: "PATCH",
       headers: {
